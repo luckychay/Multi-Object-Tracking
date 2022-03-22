@@ -117,13 +117,15 @@ def main(args):
         count_str = ""
 
     # create publisher
-    # pub = PublishRosTopic()
+    pub = PublishRosTopic()
 
     if pt and device.type != 'cpu':
         model(torch.zeros(1, 3, *imgsz).to(device).type_as(next(model.model.parameters())))  # warmup
     dt, seen = [0.0, 0.0, 0.0, 0.0], 0
 
     signal.signal(signal.SIGINT, handler)
+
+    start_time = time_sync()
 
     for frame_idx, (path, img, im0s, vid_cap, s) in enumerate(dataset):
         tram_status = 0
@@ -191,21 +193,20 @@ def main(args):
 
                 annotator = Annotator(im0, line_width=2, pil=not ascii)
 
-                # Determination of the lines may be tricky
+                # Determination of the lines may be tricky, use incline line
                 shape = im0.shape
-                entrance1 =  tuple(map(int,[0, shape[0] / 2.0, shape[1], shape[0] / 2.0]))
-                entrance2 =  tuple(map(int,[0, shape[0] / 1.8, shape[1], shape[0] / 1.8]))
+                # entrance1 =  tuple(map(int,[0, shape[0] / 2.0, shape[1], shape[0] / 2.0]))
+                # entrance2 =  tuple(map(int,[0, shape[0] / 1.8, shape[1], shape[0] / 1.8]))
+
+                entrance1 = tuple(map(int,[shape[1]/2.0, shape[0] / 2.0, shape[1], shape[0] / 2.0]))
+                entrance2 = tuple(map(int,[shape[1]/1.5, shape[0] / 2.0, shape[1], shape[0] / 1.8]))
 
                 if det is not None and len(det):
                     # Rescale boxes from img_size to im0 size
                     det[:, :4] = scale_coords(
                         img.shape[2:], det[:, :4], im0.shape).round()
 
-                    # Print results
-                    for c in det[:, -1].unique():
-                        n = (det[:, -1] == c).sum()  # detections per class
-                        s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
-
+                    
                     xywhs = xyxy2xywh(det[:, 0:4])
                     confs = det[:, 4]
                     clss = det[:, 5]
@@ -216,11 +217,23 @@ def main(args):
                         outputs = tracker.update(xywhs.cpu(), confs.cpu(), clss.cpu(), im0)
                     elif args.tracker == 'bytetracker':
                         outputs = tracker.update(det[:, 0:5].cpu(),[im0.shape[0],im0.shape[1]],[im0.shape[0],im0.shape[1]])
+                    elif args.tracker == 'deep_bytetracker':
+                        outputs = tracker.update(det[:, 0:5].cpu(),[im0.shape[0],im0.shape[1]],[im0.shape[0],im0.shape[1]],im0)
                     t5 = time_sync()
                     dt[3] += t5 - t4
 
+                    # # Print results
+                    # for c in det[:, -1].unique():
+                    #     n = (det[:, -1] == c).sum()  # detections per class
+                    #     s += f"{n} {names[int(c)]} {'s' * (n > 1)}, "  # add to string  class name: {names[int(c)]}
+
+
                     # draw boxes for visualization
                     if len(outputs) > 0:
+
+                        n = len(outputs)
+                        s += f"{n} person{'s' * (n>1)}"
+
                         # xyxy boxes to be sent
                         data = boxes()
                         for j, (output, conf,cls) in enumerate(zip(outputs, confs, clss)):
@@ -235,20 +248,26 @@ def main(args):
                             data.boxes.append(b)
 
                             c = int(cls)  # integer class
-                            label = f'{track_id} {names[c]} {conf:.2f}'
+                            label = f'{track_id} {conf:.2f}' # class name:{names[c]}
                             annotator.box_label(bboxes, label, color=colors(c, True))
 
                             # Use two line to do entrance counting
                             if args.en_counting and cls in args.classes:
-
-                                entrance_y1 = entrance1[1] 
-                                entrance_y2 = entrance2[1]
-
+                                
                                 if track_id < 0: continue
 
                                 x1, y1, x2,y2 = bboxes
                                 center_x = (x1 + x2)/2.
                                 center_y = (y1 + y2)/2.
+
+                                k1 = (entrance1[3] - entrance1[1]) / (entrance1[2] - entrance1[0])
+                                k2 = (entrance2[3] - entrance2[1]) / (entrance2[2] - entrance2[0])
+                                b1 = entrance1[3] - k1 * entrance1[2]
+                                b2 = entrance2[3] - k2 * entrance2[2]
+
+                                entrance_y1 = entrance1[1] 
+                                entrance_y2 = entrance2[1]
+
 
                                 if track_id in prev_center:
 
@@ -289,8 +308,8 @@ def main(args):
                                 with open(txt_path, 'a') as f:
                                     f.write(('%g ' * 10 + '\n') % (frame_idx + 1, id, bbox_left,  # MOT format
                                                                 bbox_top, bbox_w, bbox_h, -1, -1, -1, -1))
-                        # # send xyxy boxes
-                        # pub.send(data)
+                        # send xyxy boxes
+                        pub.send(data)
 
                     LOGGER.info(f'{s}Done. YOLO:({t3 - t2:.3f}s), DeepSort:({t5 - t4:.3f}s)')
                 else:
@@ -383,8 +402,8 @@ def get_args():
     # tracking args
     parser.add_argument("--track_thresh", type=float, default=0.5, help="tracking confidence threshold")
     parser.add_argument("--track_buffer", type=int, default=30, help="the frames for keep lost tracks")
-    parser.add_argument("--match_thresh", type=int, default=0.8, help="matching threshold for tracking")
-    parser.add_argument('--min-box-area', type=float, default=10, help='filter out tiny boxes')
+    parser.add_argument("--match_thresh", type=float, default=0.8, help="matching threshold for tracking")
+    parser.add_argument('--min-box-area', type=int, default=10, help='filter out tiny boxes')
     parser.add_argument("--mot20", dest="mot20", default=False, action="store_true", help="test mot20.")
 
     ####deep sort

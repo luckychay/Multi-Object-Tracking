@@ -1,1 +1,1 @@
-python3 main.py --device 0 --source 1 --topic /its2/usb_cam/usb_cam_1/compressed --tracker deepsort --save-vid --show-vid --classes 1 --roi --yolo_model crowdhuman_yolov5m.pt   
+python3 main.py --device 0 --conf-thres 0.1 --iou-thres 0.5 --track_thresh 0.5 --match_thresh 0.8 --source 1 --topic /its1/usb_cam/usb_cam_1/compressed --tracker deep_bytetracker --save-vid --show-vid --classes 0  --yolo_model crowdhuman_yolov5m.pt   

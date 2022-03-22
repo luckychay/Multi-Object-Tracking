@@ -130,6 +130,7 @@ class NearestNeighborDistanceMetric(object):
         """
         for feature, target in zip(features, targets):
             self.samples.setdefault(target, []).append(feature)
+            ## keep last budget(100) appearance descriptors for each track
             if self.budget is not None:
                 self.samples[target] = self.samples[target][-self.budget:]
         self.samples = {k: self.samples[k] for k in active_targets}

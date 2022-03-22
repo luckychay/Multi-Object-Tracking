@@ -1,6 +1,6 @@
 import numpy as np
 from collections import deque
-import os
+import sys
 import os.path as osp
 import copy
 import torch
@@ -12,18 +12,22 @@ from .basetrack import BaseTrack, TrackState
 from ..build import TRACKER_REGISTRY
 from tracker.tracker import Tracker
 
-__all__ =["STrack","BYTETracker"]
+sys.path.append('tracker/deep_sort/deep/reid')
+from torchreid.utils import FeatureExtractor
+
+__all__ =["STrack","DeepBYTETracker"]
 
 
 class STrack(BaseTrack):
     shared_kalman = KalmanFilter()
-    def __init__(self, tlwh, score):
+    def __init__(self, tlwh, score, feature):
 
         # wait activate
         self._tlwh = np.asarray(tlwh, dtype=np.float)
         self.kalman_filter = None
         self.mean, self.covariance = None, None
         self.is_activated = False
+        self.curr_feature = feature
 
         self.score = score
         self.tracklet_len = 0
@@ -147,7 +151,7 @@ class STrack(BaseTrack):
         return 'OT_{}_({}-{})'.format(self.track_id, self.start_frame, self.end_frame)
 
 
-class BYTETracker(Tracker):
+class DeepBYTETracker(Tracker):
     def __init__(self, args, frame_rate=30):
         self.tracked_stracks = []  # type: list[STrack]
         self.lost_stracks = []  # type: list[STrack]
@@ -160,8 +164,24 @@ class BYTETracker(Tracker):
         self.buffer_size = int(frame_rate / 30.0 * args.track_buffer)
         self.max_time_lost = self.buffer_size
         self.kalman_filter = KalmanFilter()
+        self.extractor = FeatureExtractor(
+            model_name=args.deep_sort_model,
+            device=str(args.device)
+        )
 
-    def update(self, output_results, img_info, img_size):
+    def get_features(self, bbox_xyxy, ori_img):
+        im_crops = []
+        for box in bbox_xyxy:
+            x1, y1, x2, y2 = box
+            im = ori_img[int(y1):int(y2), int(x1):int(x2)]
+            im_crops.append(im)
+        if im_crops:
+            features = self.extractor(im_crops)
+        else:
+            features = np.array([])
+        return features
+
+    def update(self, output_results, img_info, img_size,img):
         self.frame_id += 1
         activated_starcks = []
         refind_stracks = []
@@ -189,10 +209,14 @@ class BYTETracker(Tracker):
         scores_keep = scores[remain_inds]
         scores_second = scores[inds_second]
 
+        ## add reid features into matching 
+        features = self.get_features(dets,img)
+        features_second = self.get_features(dets_second,img)
+
         if len(dets) > 0:
             '''Detections'''
-            detections = [STrack(STrack.tlbr_to_tlwh(tlbr), s) for
-                          (tlbr, s) in zip(dets, scores_keep)]
+            detections = [STrack(STrack.tlbr_to_tlwh(tlbr), s, f.cpu().numpy()) for
+                          (tlbr, s, f) in zip(dets, scores_keep, features)]
         else:
             detections = []
 
@@ -205,18 +229,24 @@ class BYTETracker(Tracker):
             else:
                 tracked_stracks.append(track)
 
+
         ''' Step 2: First association, with high score detection boxes'''
         strack_pool = joint_stracks(tracked_stracks, self.lost_stracks)
         # Predict the current location with KF
         STrack.multi_predict(strack_pool)
-        dists = matching.iou_distance(strack_pool, detections)
+        iou_dists = matching.iou_distance(strack_pool, detections)
         if not self.args.mot20:
-            dists = matching.fuse_score(dists, detections)
+            iou_dists = matching.fuse_score(iou_dists, detections)
+        app_dists = matching.embedding_distance(strack_pool, detections)
+        lamb = 0.7
+        dists = lamb*iou_dists + (1.0-lamb)*app_dists
         matches, u_track, u_detection = matching.linear_assignment(dists, thresh=self.args.match_thresh)
 
         for itracked, idet in matches:
             track = strack_pool[itracked]
             det = detections[idet]
+            ## add new feature into matched tracks
+            track.features += det.curr_feature
             if track.state == TrackState.Tracked:
                 track.update(detections[idet], self.frame_id)
                 activated_starcks.append(track)
@@ -228,8 +258,8 @@ class BYTETracker(Tracker):
         # association the untrack to the low score detections
         if len(dets_second) > 0:
             '''Detections'''
-            detections_second = [STrack(STrack.tlbr_to_tlwh(tlbr), s) for
-                          (tlbr, s) in zip(dets_second, scores_second)]
+            detections_second = [STrack(STrack.tlbr_to_tlwh(tlbr), s, f.cpu().numpy()) for
+                          (tlbr, s, f) in zip(dets_second, scores_second,features_second)]
         else:
             detections_second = []
         r_tracked_stracks = [strack_pool[i] for i in u_track if strack_pool[i].state == TrackState.Tracked]
@@ -238,6 +268,8 @@ class BYTETracker(Tracker):
         for itracked, idet in matches:
             track = r_tracked_stracks[itracked]
             det = detections_second[idet]
+            ## add new feature into matched tracks
+            track.features += det.curr_feature
             if track.state == TrackState.Tracked:
                 track.update(det, self.frame_id)
                 activated_starcks.append(track)
@@ -271,6 +303,10 @@ class BYTETracker(Tracker):
             if track.score < self.det_thresh:
                 continue
             track.activate(self.kalman_filter, self.frame_id)
+            ## add first feature
+            print(track.curr_feature.shape)
+            track.features.append(track.curr_feature)
+            print(len(track.features))
             activated_starcks.append(track)
         """ Step 5: Update state"""
         for track in self.lost_stracks:
@@ -341,6 +377,6 @@ def remove_duplicate_stracks(stracksa, stracksb):
     return resa, resb
 
 @TRACKER_REGISTRY.register()
-def bytetracker(args):
-    tracker = BYTETracker(args)
+def deep_bytetracker(args):
+    tracker = DeepBYTETracker(args)
     return tracker

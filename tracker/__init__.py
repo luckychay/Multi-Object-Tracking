@@ -7,3 +7,4 @@ LastEditTime: 2022-03-04 17:57:21
 '''
 from .deep_sort.deep_sort import deepsort
 from .bytetracker.byte_tracker import bytetracker
+from .deep_bytetracker.deep_bytetracker import deep_bytetracker
