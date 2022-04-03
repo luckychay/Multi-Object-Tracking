@@ -127,7 +127,8 @@ def main(args):
 
     start_time = time_sync()
 
-    for frame_idx, (path, img, im0s, vid_cap, s) in enumerate(dataset):
+    for frame_idx, (path, img, im0s, vid_cap, data) in enumerate(dataset):
+        s = ''
         tram_status = 0
         # when stopped, start the detection process
         if tram_status==0:
@@ -227,6 +228,9 @@ def main(args):
                     #     n = (det[:, -1] == c).sum()  # detections per class
                     #     s += f"{n} {names[int(c)]} {'s' * (n > 1)}, "  # add to string  class name: {names[int(c)]}
 
+                    # xyxy boxes to be sent, set the header as same as image header
+                    bs = boxes()
+                    bs.header = data.header
 
                     # draw boxes for visualization
                     if len(outputs) > 0:
@@ -234,8 +238,6 @@ def main(args):
                         n = len(outputs)
                         s += f"{n} person{'s' * (n>1)}"
 
-                        # xyxy boxes to be sent
-                        data = boxes()
                         for j, (output, conf,cls) in enumerate(zip(outputs, confs, clss)):
 
                             bboxes = output[0:4]
@@ -245,7 +247,7 @@ def main(args):
                             #store box detected
                             b = box()
                             b.coordinates = bboxes
-                            data.boxes.append(b)
+                            bs.boxes.append(b)
 
                             c = int(cls)  # integer class
                             label = f'{track_id} {conf:.2f}' # class name:{names[c]}
@@ -308,8 +310,9 @@ def main(args):
                                 with open(txt_path, 'a') as f:
                                     f.write(('%g ' * 10 + '\n') % (frame_idx + 1, id, bbox_left,  # MOT format
                                                                 bbox_top, bbox_w, bbox_h, -1, -1, -1, -1))
-                        # send xyxy boxes
-                        pub.send(data)
+                    
+                    # send xyxy boxes, if no detection, bs.boxes will be empty
+                    pub.send(bs)
 
                     LOGGER.info(f'{s}Done. YOLO:({t3 - t2:.3f}s), DeepSort:({t5 - t4:.3f}s)')
                 else:

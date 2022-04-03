@@ -23,12 +23,15 @@ class LoadRosTopic:  # for inference
         self.auto = auto
         self.topic = topic
         self.datatype = datatype
+        self.data = None
         self.image = None
+        self.header = None
         rospy.init_node('detection_listener', anonymous=True)
         rospy.Subscriber(self.topic, datatype, self.callback, queue_size = 3)
         # rospy.spin()
 
     def callback(self,data):
+        self.data = data
         if self.datatype == CustomCImage:
             np_arr = np.fromstring(data.image.data, np.uint8)
             self.tram_status = data.tram_status.status
@@ -36,6 +39,7 @@ class LoadRosTopic:  # for inference
         elif self.datatype == CompressedImage:
             np_arr = np.fromstring(data.data, np.uint8)
             self.tram_status = 0
+            self.header = data.header
         self.image = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
 
     def __iter__(self):
@@ -55,7 +59,7 @@ class LoadRosTopic:  # for inference
         img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
         img = np.ascontiguousarray(img)
 
-        return self.topic, img, img0, None, '' #self.tram_status      
+        return self.topic, img, img0, None, self.data #self.tram_status      
 
     def __len__(self):
         return 0
