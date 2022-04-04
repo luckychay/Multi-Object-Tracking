@@ -199,8 +199,8 @@ def main(args):
                 # entrance1 =  tuple(map(int,[0, shape[0] / 2.0, shape[1], shape[0] / 2.0]))
                 # entrance2 =  tuple(map(int,[0, shape[0] / 1.8, shape[1], shape[0] / 1.8]))
 
-                entrance1 = tuple(map(int,[shape[1]/2.0, shape[0] / 2.0, shape[1], shape[0] / 2.0]))
-                entrance2 = tuple(map(int,[shape[1]/1.5, shape[0] / 2.0, shape[1], shape[0] / 1.8]))
+                entrance1 = tuple(map(int,[shape[1]/2.0, shape[0], shape[1], shape[0] / 2.5]))
+                entrance2 = tuple(map(int,[shape[1]/1.5, shape[0], shape[1], shape[0] / 2.2]))
 
                 if det is not None and len(det):
                     # Rescale boxes from img_size to im0 size
@@ -267,27 +267,23 @@ def main(args):
                                 b1 = entrance1[3] - k1 * entrance1[2]
                                 b2 = entrance2[3] - k2 * entrance2[2]
 
-                                entrance_y1 = entrance1[1] 
-                                entrance_y2 = entrance2[1]
-
-
                                 if track_id in prev_center:
 
                                     # In number counting 
-                                    if prev_center[track_id][1] <= entrance_y1 and \
-                                    center_y > entrance_y1:
+                                    if prev_center[track_id][1] <= k1*prev_center[track_id][0] + b1 and \
+                                    center_y > k1*center_x + b1:
                                         in_flag[track_id] = 1
-                                    elif prev_center[track_id][1] <= entrance_y2 and \
-                                    center_y > entrance_y2 and in_flag[track_id] == 1:
+                                    elif prev_center[track_id][1] <= k2*prev_center[track_id][0] + b2 and \
+                                    center_y > k2*center_x + b2 and in_flag[track_id] == 1:
                                         in_id_list.append(track_id)
                                         in_flag[track_id] = 0
 
                                     # Out number counting
-                                    elif prev_center[track_id][1] >= entrance_y2 and \
-                                    center_y < entrance_y2:
+                                    elif prev_center[track_id][1] >= k2*prev_center[track_id][0] + b2 and \
+                                    center_y < k2*center_x + b2:
                                         out_flag[track_id] = 1
-                                    elif prev_center[track_id][1] >= entrance_y1 and \
-                                    center_y < entrance_y1 and out_flag[track_id] == 1:
+                                    elif prev_center[track_id][1] >= k1*prev_center[track_id][0] + b1 and \
+                                    center_y < k1*center_x + b1 and out_flag[track_id] == 1:
                                         out_id_list.append(track_id)
                                         out_flag[track_id] = 0
 
@@ -341,8 +337,8 @@ def main(args):
                         cv2.rectangle(im0, p1, p2, (240,240,0), -1, cv2.LINE_AA)  # filled
                         cv2.putText(im0, count_str, (p1[0], p1[1]+h+3), 0, lw / 3, (255,255,255),
                                     thickness=tf, lineType=cv2.LINE_AA)
-                        cv2.rectangle(im0,entrance1[0:2],entrance1[2:4],(0,255,255),1)
-                        cv2.rectangle(im0,entrance2[0:2],entrance2[2:4],(0,255,255),1)
+                        cv2.line(im0,entrance1[0:2],entrance1[2:4],(0,255,255),1)
+                        cv2.line(im0,entrance2[0:2],entrance2[2:4],(0,255,255),1)
 
                     # cv2.namedWindow(str(p),WINDOW_NORMAL)  
                     # cv2.resizeWindow(str(p),640,480)  
